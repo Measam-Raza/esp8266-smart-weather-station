@@ -1,6 +1,5 @@
 **WiFi Weather Station**
 
-Complete Build Guide
 
 ESP8266 NodeMCU · BME280 · INA219 · MQ-2 · IR Sensor · OLED · Solar Power
 
