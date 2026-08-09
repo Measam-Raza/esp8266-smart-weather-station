@@ -95,6 +95,14 @@ U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
 WiFiClient client;
 
 // ================================================================
+//  Peripheral Status
+// ================================================================
+
+bool bme280Available = false;
+bool ina219Available = false;
+bool oledAvailable  = false;
+
+// ================================================================
 //  Timing Configuration
 // ================================================================
 
@@ -126,40 +134,76 @@ void setup() {
   // I2C bus
   Wire.begin(PIN_SDA, PIN_SCL);
 
-  // BME280
-  if (!bme.begin(0x76)) {
-    Serial.println("[ERROR] BME280 not found – check wiring & address");
-  } else {
-    // Weather monitoring preset (slow sampling, low power)
-    bme.setSampling(Adafruit_BME280::MODE_FORCED,
-                    Adafruit_BME280::SAMPLING_X1,  // temp
-                    Adafruit_BME280::SAMPLING_X1,  // pressure
-                    Adafruit_BME280::SAMPLING_X1,  // humidity
-                    Adafruit_BME280::FILTER_OFF,
-                    Adafruit_BME280::STANDBY_MS_1000);
-    Serial.println("[OK] BME280");
-  }
+ // ================================================================
+//  BME280 Initialization
+// ================================================================
 
-  // INA219
-  if (!ina219.begin()) {
-    Serial.println("[ERROR] INA219 not found");
-  } else {
-    ina219.setCalibration_32V_2A(); // adjust if using different shunt
-    Serial.println("[OK] INA219");
-  }
+if (bme.begin(0x76)) {
 
-  // OLED
-  u8g2.begin();
-  u8g2.setFont(u8g2_font_6x10_tf);
-  showSplash();
+  bme280Available = true;
 
-  // WiFi
-  connectWiFi();
+  bme.setSampling(
+    Adafruit_BME280::MODE_FORCED,
+    Adafruit_BME280::SAMPLING_X1,  // Temperature
+    Adafruit_BME280::SAMPLING_X1,  // Pressure
+    Adafruit_BME280::SAMPLING_X1,  // Humidity
+    Adafruit_BME280::FILTER_OFF,
+    Adafruit_BME280::STANDBY_MS_1000
+  );
 
+  Serial.println("[OK] BME280 initialized");
+
+} else {
+
+  Serial.println("[ERROR] BME280 not detected");
+  Serial.println("[INFO] Check wiring and I2C address (0x76/0x77)");
+}
+
+  // ================================================================
+//  INA219 Power Monitor Initialization
+// ================================================================
+
+if (ina219.begin()) {
+
+  ina219Available = true;
+
+  ina219.setCalibration_32V_2A();
+
+  Serial.println("[OK] INA219 initialized");
+
+} else {
+
+  Serial.println("[ERROR] INA219 not detected");
+  Serial.println("[INFO] Check I2C wiring and address");
+}
+
+ // ================================================================
+//  OLED Initialization
+// ================================================================
+
+u8g2.begin();
+oledAvailable = true;
+
+u8g2.setFont(u8g2_font_6x10_tf);
+
+showSplash();
+
+Serial.println("[OK] OLED initialized");
   // ThingSpeak
   ThingSpeak.begin(client);
 
-  Serial.println("[OK] Setup complete");
+ Serial.println();
+Serial.println("========================================");
+Serial.println("       SYSTEM INITIALIZATION");
+Serial.println("========================================");
+
+Serial.printf("BME280 : %s\n", bme280Available ? "OK" : "FAIL");
+Serial.printf("INA219 : %s\n", ina219Available ? "OK" : "FAIL");
+Serial.printf("OLED   : %s\n", oledAvailable  ? "OK" : "FAIL");
+Serial.printf("WiFi   : %s\n", WiFi.status() == WL_CONNECTED ? "OK" : "FAIL");
+
+Serial.println("========================================");
+Serial.println("[SYSTEM] Initialization complete");
 }
 
 // ─────────────────────────────────────────
@@ -190,9 +234,15 @@ void loop() {
   readMQ2();
 
   // ── Update OLED (when awake) ──────────
-  if (displayOn) {
-    updateDisplay();
+ if (displayOn && oledAvailable) {
+  void updateDisplay() {
+
+  if (!oledAvailable) {
+    return;
   }
+
+  char buf[24];
+}
 
   // ── Cloud push every 30 s ─────────────
   if (now - lastPushTime >= PUSH_INTERVAL_MS) {
@@ -214,13 +264,24 @@ void loop() {
 //  Sensor readers
 // ─────────────────────────────────────────
 void readBME280() {
-  bme.takeForcedMeasurement();            // required in FORCED mode
-  temperature = bme.readTemperature();    // °C
-  humidity    = bme.readHumidity();       // %RH
-  pressure    = bme.readPressure() / 100.0F; // hPa
+
+  if (!bme280Available) {
+    return;
+  }
+
+  bme.takeForcedMeasurement();
+
+  temperature = bme.readTemperature();
+  humidity    = bme.readHumidity();
+  pressure    = bme.readPressure() / 100.0F;
 }
 
 void readINA219() {
+
+  if (!ina219Available) {
+    return;
+  }
+
   busVoltage = ina219.getBusVoltage_V();
   current_mA = ina219.getCurrent_mA();
   power_mW   = ina219.getPower_mW();
