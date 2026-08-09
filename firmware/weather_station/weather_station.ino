@@ -1,17 +1,43 @@
 /*
- ============================================================
-  WiFi Weather Station – ESP8266 NodeMCU
-  Components: BME280 · INA219 · MQ-2 · IR · OLED 1.3" · Solar
- ============================================================
-  Libraries needed (install via Arduino Library Manager):
-    - Adafruit BME280 Library
-    - Adafruit INA219
-    - Adafruit SSD1306  OR  U8g2 (for SH1106 OLED)
-    - Adafruit GFX Library
-    - ESP8266WiFi       (bundled with ESP8266 board package)
-    - ThingSpeak        (by MathWorks)  ← OR swap to Blynk/MQTT
- ============================================================
-*/
+ * ================================================================
+ *  Solar-Powered IoT Environmental Monitoring Station
+ * ================================================================
+ *
+ *  Description:
+ *  ESP8266-based environmental monitoring system integrating:
+ *
+ *    - BME280  : Temperature, humidity and atmospheric pressure
+ *    - MQ-2    : Gas/smoke sensor indication
+ *    - INA219  : Voltage, current and power monitoring
+ *    - OLED    : Local real-time data visualization
+ *    - IR      : Wave-to-wake display interaction
+ *    - Wi-Fi   : Wireless connectivity
+ *    - ThingSpeak : Cloud telemetry
+ *
+ *  Target:
+ *    NodeMCU 1.0 (ESP-12E Module)
+ *    ESP8266 @ 80 MHz
+ *
+ *  Communication:
+ *    I2C  -> BME280, INA219, OLED
+ *    Wi-Fi -> ThingSpeak
+ *
+ *  Firmware:
+ *    Arduino / C++
+ *
+ * ================================================================
+ *  IMPORTANT:
+ *  Do not commit real Wi-Fi credentials or ThingSpeak API keys
+ *  to a public repository.
+ * ================================================================
+ */
+
+#include <Wire.h>
+#include <ESP8266WiFi.h>
+#include <Adafruit_BME280.h>
+#include <Adafruit_INA219.h>
+#include <U8g2lib.h>
+#include "ThingSpeak.h"
 
 // ── Board package URL (paste in Arduino → Preferences → Additional Boards) ──
 // http://arduino.esp8266.com/stable/package_esp8266com_index.json
@@ -24,25 +50,30 @@
 #include <U8g2lib.h>          // Works for both SSD1306 & SH1106
 #include "ThingSpeak.h"       // Cloud push
 
-// ─────────────────────────────────────────
-//  WiFi & Cloud credentials  ← EDIT THESE
-// ─────────────────────────────────────────
+// ================================================================
+//  Network & Cloud Configuration
+// ================================================================
+//
+//  IMPORTANT:
+//  Keep real credentials private. Do not commit passwords,
+//  API keys, or other secrets to a public repository.
+//
+
 const char* WIFI_SSID     = "YOUR_SSID";
 const char* WIFI_PASSWORD = "YOUR_PASSWORD";
 
-// ThingSpeak (free tier: 1 channel, up to 8 fields)
-// Sign up at https://thingspeak.com · Create channel · Copy keys below
-unsigned long CHANNEL_ID  = 0;               // e.g. 2345678
-const char*   WRITE_KEY   = "YOUR_WRITE_API_KEY";
+const unsigned long THINGSPEAK_CHANNEL_ID = 0;
+const char* THINGSPEAK_WRITE_KEY = "YOUR_WRITE_API_KEY";
 
-// ─────────────────────────────────────────
-//  Pin definitions
-// ─────────────────────────────────────────
-#define PIN_SCL     D1    // GPIO5  – I2C clock (shared bus)
-#define PIN_SDA     D2    // GPIO4  – I2C data  (shared bus)
-#define PIN_MQ2     A0    // ADC    – MQ-2 analog out (0-1 V max!)
-#define PIN_IR      D6    // GPIO12 – IR sensor OUT (LOW = motion)
-#define PIN_LED     D7    // GPIO13 – optional wake indicator LED
+// ================================================================
+//  Hardware Pin Configuration
+// ================================================================
+
+constexpr uint8_t PIN_SCL = D1;      // GPIO5  - I2C clock
+constexpr uint8_t PIN_SDA = D2;      // GPIO4  - I2C data
+constexpr uint8_t PIN_MQ2 = A0;      // ADC    - MQ-2 analog output
+constexpr uint8_t PIN_IR  = D6;      // GPIO12 - IR sensor output
+constexpr uint8_t PIN_LED = D7;      // GPIO13 - status LED
 
 // ─────────────────────────────────────────
 //  I2C addresses
@@ -63,19 +94,16 @@ U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
 
 WiFiClient client;
 
-// ─────────────────────────────────────────
-//  Timing
-// ─────────────────────────────────────────
-const unsigned long PUSH_INTERVAL_MS = 30000; // 30 seconds
-unsigned long lastPushTime = 0;
+// ================================================================
+//  Timing Configuration
+// ================================================================
 
-// ─────────────────────────────────────────
-//  Deep-sleep / display flags
-// ─────────────────────────────────────────
-bool displayOn = false;
-unsigned long displayTimeout = 0;
-const unsigned long DISPLAY_ON_MS = 15000; // stay on 15 s after IR trigger
+constexpr unsigned long CLOUD_UPDATE_INTERVAL_MS = 30000UL;
+constexpr unsigned long DISPLAY_TIMEOUT_MS       = 15000UL;
+constexpr unsigned long LOOP_DELAY_MS            = 500UL;
 
+unsigned long lastCloudUpdate = 0;
+unsigned long displayTimeout  = 0;
 // ─────────────────────────────────────────
 //  Sensor data
 // ─────────────────────────────────────────
